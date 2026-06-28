@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fusion Hein-Chateau</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#f4f1ea; font-family:'Hanken Grotesk',system-ui,sans-serif; -webkit-font-smoothing:antialiased; color:#2a2622; }
+  .num { font-variant-numeric:tabular-nums; }
+  button { font-family:inherit; }
+  input { font-family:inherit; }
+  @media print {
+    body { background:#fff; }
+    #appbar, #printbtn { display:none !important; }
+    @page { size:landscape; margin:10mm; }
+  }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState, useEffect, useCallback, useMemo} = React;
+
+const INIT_SHIFTS = {
+  // Hein — jede:r (außer Sarah) bekommt Ö und S
+  1:  ['F','S','M','F','M'],   // Ivan 40h:  2Ö 1S
+  2:  ['S','F','M','-','S'],   // Janis 30h: 1Ö 2S
+  3:  ['M','M','F','S','F'],   // Claude 40h: 2Ö 1S
+  4:  ['-','F','-','S','-'],   // Conni 20h: 1Ö 1S
+  5:  ['M','-','M','-','M'],   // Sarah 20h: exempt, kein Ö/S
+  // Chateau — jede:r (außer Angela) bekommt Ö und S
+  7:  ['F','M','S','M','-'],   // Lynn 35h:  1Ö 1S
+  8:  ['S','F','-','M','M'],   // Flou 30h:  1Ö 1S
+  9:  ['M','S','F','-','-'],   // Lisa 25h:  1Ö 1S
+  10: ['M','F','M','S','F'],   // Danielle 40h: 2Ö 1S
+  11: ['F','-','S','M','M'],   // Isabelle 30h: 1Ö 1S
+  12: ['M','M','-','M','-'],   // Angela 20h: exempt, kein Ö/S
+  13: ['-','M','S','F','-'],   // Anmarie 25h: 1Ö 1S
+};
+
+const INIT_STAFF = [
+  { id:1,name:'Ivan',house:'hein',contract:40,canOpen:true,canClose:true,azubi:true,exemptRotation:false,note:'',weeks:null},
+  { id:2,name:'Janis',house:'hein',contract:30,canOpen:true,canClose:true,azubi:false,exemptRotation:false,note:'',weeks:null},
+  { id:3,name:'Claude',house:'hein',contract:40,canOpen:true,canClose:true,azubi:false,exemptRotation:false,note:'',weeks:null},
+  { id:4,name:'Conni',house:'hein',contract:20,canOpen:true,canClose:true,azubi:false,exemptRotation:false,note:'',weeks:null},
+  { id:5,name:'Sarah',house:'hein',contract:20,canOpen:true,canClose:false,azubi:false,exemptRotation:true,note:'Stillt – kein Spätdienst',weeks:null},
+  { id:7,name:'Lynn',house:'chateau',contract:35,canOpen:true,canClose:true,azubi:false,exemptRotation:false,note:'',weeks:null},
+  { id:8,name:'Flou',house:'chateau',contract:30,canOpen:true,canClose:true,azubi:false,exemptRotation:false,note:'',weeks:null},
+  { id:9,name:'Lisa',house:'chateau',contract:25,canOpen:true,canClose:true,azubi:false,exemptRotation:false,note:'',weeks:null},
+  { id:10,name:'Danielle',house:'chateau',contract:40,canOpen:true,canClose:true,azubi:false,exemptRotation:false,note:'',weeks:null},
+  { id:11,name:'Isabelle',house:'chateau',contract:30,canOpen:true,canClose:true,azubi:false,exemptRotation:false,note:'',weeks:null},
+  { id:12,name:'Angela',house:'chateau',contract:20,canOpen:true,canClose:false,azubi:true,exemptRotation:true,note:'Stillt – kein Spätdienst',weeks:null},
+  { id:13,name:'Anmarie',house:'chateau',contract:25,canOpen:true,canClose:true,azubi:false,exemptRotation:false,note:'',weeks:null},
+];
+
+function initWeeks(shifts, base) {
+  const conv = (c, w) => c === 'F' ? '07:00-15:00' : c === 'M' ? '09:00-16:00' : c === 'S' ? (w < 4 ? '10:00-18:00' : '10:30-18:30') : '-';
+  const b = (shifts && shifts.length === 5) ? shifts : (base || ['F','M','S','M','-']);
+  return Array.from({length:7}, (_,w) => b.map(c => conv(c, w)));
+}
+
+const STR = {
+  de: {
+    brand:'Fusion Hein-Chateau', hein:'Haus Hein', chateau:'Haus Chateau',
+    tabTeam:'Team', tabOverview:'Übersicht', tabWeek:'Woche', print:'Drucken',
+    teamTitle:'Mitarbeitende verwalten', teamSub:'Personen anlegen: Haus, Wochenstunden, Öffnen/Schließen, Azubi-Status.',
+    addPerson:'+ Person hinzufügen', edit:'Bearbeiten', del:'Löschen', emptyHouse:'Noch niemand zugeordnet.',
+    fName:'Name', fNamePlace:'Vor- und Nachname', fHouse:'Haus', fHours:'Wochenstunden',
+    fCanOpen:'Kann öffnen (Frühdienst)', fCanClose:'Kann schließen (Spätdienst)', fAzubi:'In Ausbildung (Azubi)', fExempt:'Von gleicher Verteilung ausnehmen',
+    fNote:'Hinweis (optional)', fNotePlace:'z. B. nie Spätdienst',
+    save:'Speichern', cancel:'Abbrechen', newPerson:'Neue Person', editPerson:'Person bearbeiten', yes:'Ja', no:'Nein',
+    ovTitle:'Verteilung Öffnungs- & Schließdienste',
+    ovSub:'Übersicht über alle 7 Wochen: Wer übernimmt wie viele Öffnungen (Ö) und Schließungen (S)? So erkennst du Ungleichgewichte bei der Fusion sofort.',
+    fairBalanced:'ausgewogen ✓', fairUnbalanced:'ungleich verteilt',
+    fairExemptLabel:'Ausgenommen:', staffWord:'Mitarbeitende',
+    covTitle:'Tagesabdeckung', covSub:'Sind pro Tag mindestens 2 Öffner:innen und 2 Schließer:innen eingeteilt?',
+    covOpen:'Ö', covClose:'S', complete:'vollständig ✓',
+    days:['Mo','Di','Mi','Do','Fr'], daysLong:['Montag','Dienstag','Mittwoch','Donnerstag','Freitag'],
+    whatsMissing:'Was fehlt noch?', cta:'Zur Wochenansicht →',
+    allGood:'Alles gut', allGoodBody:'Öffnung und Schließung sind an allen Tagen besetzt.',
+    coverGapClose:'Schließung unterbesetzt', coverGapOpen:'Öffnung unterbesetzt', onDays:'an:',
+    colEmployee:'Mitarbeiter:in', colIstSoll:'Ist/Soll', frei:'frei',
+    legFrueh:'Öffnung (07:00)', legMitte:'sonstige Zeit', legAzubi:'* in Ausbildung',
+    badgeOpen:'Ö', badgeClose:'S', badgeAzubi:'Azubi',
+    pStart:'Beginn', pEnd:'Ende', apply:'Übernehmen',
+    optFrueh:'Frühdienst', optSpaet:'Spätdienst', optMitte:'Mittagsschicht', optFrei:'frei / kein Dienst',
+    kindOpen:'zählt als Öffnung', kindClose:'zählt als Schließung', kindMid:'Mittagsschicht',
+    errDur:'Ende muss nach Beginn liegen.', blockedClose:'Spätdienst nicht möglich.', blockedOpen:'Frühdienst nicht möglich.',
+    weekHint:'Tippe auf eine Zelle, um die Schicht zu ändern.',
+    ruleLabel:'Ferienregel (Woche 1–4):', ruleText:'Schließen 10:00–18:00 · ab Woche 5: 10:30–18:30',
+    perHouse:'Pro Haus', total:'Gesamt', openings:'Öffnungen', closings:'Schließungen',
+    personLabel:'Person', countLabel:'Anzahl',
+    houseOverview:'Dienste pro Haus',
+    houseOverviewSub:'Wie verteilen sich Öffnungen und Schließungen auf die beiden Häuser?',
+  },
+  fr: {
+    brand:'Fusion Hein-Chateau', hein:'Maison Hein', chateau:'Maison Chateau',
+    tabTeam:'Équipe', tabOverview:'Aperçu', tabWeek:'Semaine', print:'Imprimer',
+    teamTitle:'Gérer le personnel', teamSub:'Ajoutez les personnes : maison, heures, droit d\'ouvrir/fermer, statut apprenti·e.',
+    addPerson:'+ Ajouter', edit:'Modifier', del:'Supprimer', emptyHouse:'Personne pour l\'instant.',
+    fName:'Nom', fNamePlace:'Prénom et nom', fHouse:'Maison', fHours:'Heures / semaine',
+    fCanOpen:'Peut ouvrir (matin)', fCanClose:'Peut fermer (soir)', fAzubi:'En formation', fExempt:'Exclure de la répartition',
+    fNote:'Remarque (option)', fNotePlace:'p. ex. jamais de fermeture',
+    save:'Enregistrer', cancel:'Annuler', newPerson:'Nouvelle personne', editPerson:'Modifier', yes:'Oui', no:'Non',
+    ovTitle:'Répartition ouvertures & fermetures',
+    ovSub:'Aperçu sur 7 semaines : combien d\'ouvertures (O) et de fermetures (F) par personne ? Pour repérer les déséquilibres lors de la fusion.',
+    fairBalanced:'équilibré ✓', fairUnbalanced:'déséquilibré',
+    fairExemptLabel:'Exclus :', staffWord:'employés',
+    covTitle:'Couverture journalière', covSub:'Au moins 2 ouvreurs et 2 fermeurs par jour ?',
+    covOpen:'O', covClose:'F', complete:'complet ✓',
+    days:['Lun','Mar','Mer','Jeu','Ven'], daysLong:['lundi','mardi','mercredi','jeudi','vendredi'],
+    whatsMissing:'Que manque-t-il ?', cta:'Vers la vue semaine →',
+    allGood:'Tout est couvert', allGoodBody:'Ouverture et fermeture assurées tous les jours.',
+    coverGapClose:'fermeture sous-dotée', coverGapOpen:'ouverture sous-dotée', onDays:'les :',
+    colEmployee:'Personne', colIstSoll:'Réel/Cible', frei:'libre',
+    legFrueh:'Ouverture (07:00)', legMitte:'autre horaire', legAzubi:'* en formation',
+    badgeOpen:'O', badgeClose:'F', badgeAzubi:'Appr.',
+    pStart:'Début', pEnd:'Fin', apply:'Appliquer',
+    optFrueh:'Matin', optSpaet:'Soir', optMitte:'Midi', optFrei:'libre',
+    kindOpen:'= ouverture', kindClose:'= fermeture', kindMid:'service midi',
+    errDur:'La fin doit suivre le début.', blockedClose:'Soir impossible.', blockedOpen:'Matin impossible.',
+    weekHint:'Touchez une case pour changer le service.',
+    ruleLabel:'Règle vacances (sem. 1–4) :', ruleText:'Fermeture 10:00–18:00 · dès sem. 5: 10:30–18:30',
+    perHouse:'Par maison', total:'Total', openings:'Ouvertures', closings:'Fermetures',
+    personLabel:'Personne', countLabel:'Nombre',
+    houseOverview:'Services par maison',
+    houseOverviewSub:'Comment les ouvertures et fermetures se répartissent entre les deux maisons ?',
+  },
+};
+
+const HOUSE_META = {
+  hein: { color:'#3d9e8e', dot:'#3d9e8e', bg:'#f0f8f6', share:0.4 },
+  chateau: { color:'#c4953a', dot:'#c4953a', bg:'#fdf8ef', share:0.6 },
+};
+
+function isFrei(v){ return !v || v==='-'; }
+function startOf(v){ return isFrei(v)?'':v.split('-')[0]; }
+function endOf(v){ return isFrei(v)?'':v.split('-')[1]; }
+function toMin(t){ if(!t)return 0; const p=String(t).split(':'); return (parseInt(p[0],10)||0)*60+(parseInt(p[1],10)||0); }
+function isOpen(v){ return !isFrei(v) && startOf(v)==='07:00'; }
+function isClose(v){ return !isFrei(v) && (endOf(v)==='18:00'||endOf(v)==='18:30'); }
+function shiftHours(v){ if(isFrei(v))return 0; const m=toMin(endOf(v))-toMin(startOf(v)); return m>0?m/60:0; }
+
+// ===== FAIR DISTRIBUTE (pure function) =====
+function workDayCount(contract) { return Math.max(2, Math.min(5, Math.round(contract / 8))); }
+
+function computeTargets(staffList) {
+  const eligible = staffList.filter(s => !s.exemptRotation);
+  const openers = eligible.filter(s => s.canOpen);
+  const closers = eligible.filter(s => s.canClose);
+  const totalDaysO = openers.reduce((sum, s) => sum + workDayCount(s.contract) * 7, 0);
+  const totalDaysS = closers.reduce((sum, s) => sum + workDayCount(s.contract) * 7, 0);
+  const targetOMap = {}; const targetSMap = {};
+  openers.forEach(s => { targetOMap[s.id] = Math.round(70 * (workDayCount(s.contract) * 7) / totalDaysO); });
+  closers.forEach(s => { targetSMap[s.id] = Math.round(70 * (workDayCount(s.contract) * 7) / totalDaysS); });
+  return { targetOMap, targetSMap };
+}
+
+function fairDistribute(inputStaff) {
+  const newStaff = inputStaff.map(s => ({...s, weeks: Array.from({length:7}, () => ['-','-','-','-','-'])}));
+  const eligible = newStaff.filter(s => !s.exemptRotation);
+  const openers = eligible.filter(s => s.canOpen);
+  const closers = eligible.filter(s => s.canClose);
+
+  // Gewichtete Soll-Werte nach Arbeitstagen: 40h→9, 30–35h→7, 20–25h→5
+  const { targetOMap, targetSMap } = computeTargets(newStaff);
+
+  const oCount = {}; const cCount = {};
+  newStaff.forEach(s => { oCount[s.id] = 0; cCount[s.id] = 0; });
+
+  // Build working days
+  const wMap = {}; const grid = {};
+  for (let w = 0; w < 7; w++) {
+    newStaff.forEach(s => {
+      const days = workDayCount(s.contract);
+      const freeCount = 5 - days;
+      const freeStart = ((w * 2) + (s.id * 3)) % 5;
+      const free = new Set();
+      for (let f = 0; f < freeCount; f++) free.add((freeStart + f) % 5);
+      if (!wMap[s.id]) wMap[s.id] = {};
+      if (!grid[s.id]) grid[s.id] = {};
+      wMap[s.id][w] = new Set([0,1,2,3,4].filter(d => !free.has(d)));
+      grid[s.id][w] = [0,1,2,3,4].map(d => wMap[s.id][w].has(d) ? 'M' : '-');
+    });
+  }
+
+  // Pick best: person with lowest progress toward their individual target, prefer own house
+  const pick = (list, countMap, tMap, w, d, hid) => {
+    // Own house, under target
+    let pool = list.filter(s => s.house===hid && wMap[s.id][w].has(d) && grid[s.id][w][d]==='M' && countMap[s.id]<tMap[s.id]);
+    // Cross-house, under target
+    if(!pool.length) pool = list.filter(s => s.house!==hid && wMap[s.id][w].has(d) && grid[s.id][w][d]==='M' && countMap[s.id]<tMap[s.id]);
+    // Fallback anyone available
+    if(!pool.length) pool = list.filter(s => wMap[s.id][w].has(d) && grid[s.id][w][d]==='M');
+    if(!pool.length) return null;
+    pool.sort((a,b) => (countMap[a.id]/tMap[a.id]) - (countMap[b.id]/tMap[b.id]));
+    return pool[0];
+  };
+
+  // Simple day-by-day: exactly 2 Ö + 2 S per day, alternating house order
+  for (let w = 0; w < 7; w++) {
+    for (let d = 0; d < 5; d++) {
+      // Alternate which house goes first
+      const h1 = (w*5+d) % 2 === 0 ? 'hein' : 'chateau';
+      const h2 = h1 === 'hein' ? 'chateau' : 'hein';
+
+      // Assign exactly 2 Ö (one per house)
+      const o1 = pick(openers, oCount, targetOMap, w, d, h1);
+      if(o1) { grid[o1.id][w][d]='F'; oCount[o1.id]++; }
+      const o2 = pick(openers, oCount, targetOMap, w, d, h2);
+      if(o2) { grid[o2.id][w][d]='F'; oCount[o2.id]++; }
+
+      // Assign exactly 2 S (one per house)
+      const s1 = pick(closers, cCount, targetSMap, w, d, h1);
+      if(s1) { grid[s1.id][w][d]='S'; cCount[s1.id]++; }
+      const s2 = pick(closers, cCount, targetSMap, w, d, h2);
+      if(s2) { grid[s2.id][w][d]='S'; cCount[s2.id]++; }
+    }
+  }
+
+  // Convert to time strings
+  for (let w = 0; w < 7; w++) {
+    const closeEnd = w < 4 ? '18:00' : '18:30';
+    const closeStart = w < 4 ? '10:00' : '10:30';
+    newStaff.forEach(s => {
+      const conv = (code) => code === 'F' ? '07:00-15:00' : code === 'S' ? `${closeStart}-${closeEnd}` : code === 'M' ? '09:00-16:00' : '-';
+      s.weeks[w] = grid[s.id][w].map(conv);
+    });
+  }
+  return newStaff;
+}
+
+function App() {
+  const [lang, setLang] = useState('de');
+  const [screen, setScreen] = useState('overview');
+  const [staff, setStaff] = useState([]);
+  const [nextId, setNextId] = useState(14);
+  const [weekIndex, setWeekIndex] = useState(0);
+  const [form, setForm] = useState(null);
+  const [picker, setPicker] = useState(null);
+
+  const t = STR[lang];
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('kitaTool.v15');
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (Array.isArray(d.staff)) { setStaff(d.staff); setNextId(d.nextId||14); setWeekIndex(d.weekIndex||0); if(d.lang) setLang(d.lang); return; }
+      }
+    } catch(e){}
+    // First load: apply fair distribution immediately
+    const base = INIT_STAFF.map(s => ({...s, weeks: Array.from({length:7}, () => ['-','-','-','-','-'])}));
+    setStaff(fairDistribute(base));
+  }, []);
+
+  useEffect(() => {
+    if(staff.length===0) return;
+    try { localStorage.setItem('kitaTool.v15', JSON.stringify({staff,nextId,weekIndex,lang})); } catch(e){}
+  }, [staff,nextId,weekIndex,lang]);
+
+  const wi = weekIndex;
+  const cur = useCallback((s) => (s.weeks && s.weeks[wi]) || ['-','-','-','-','-'], [wi]);
+  const worked = useCallback((s) => cur(s).reduce((a,v) => a+shiftHours(v), 0), [cur]);
+
+  const countOC = useCallback((s) => {
+    let o=0,c=0;
+    (s.weeks||[]).forEach(wk => (wk||[]).forEach(v => { if(isOpen(v))o++; if(isClose(v))c++; }));
+    return {o,c};
+  }, []);
+
+  const houseMembers = useCallback((h) => staff.filter(s => s.house===h), [staff]);
+
+  const closeStr = wi < 4 ? '18:00' : '18:30';
+  const spaetStart = wi < 4 ? '10:00' : '10:30';
+  const spaetTime = `${spaetStart}–${closeStr}`;
+
+  // ===== FORM handlers =====
+  const openNew = () => setForm({id:null,name:'',house:'hein',hours:20,canOpen:true,canClose:false,azubi:false,exemptRotation:false,note:''});
+  const openEdit = (s) => setForm({id:s.id,name:s.name,house:s.house,hours:s.contract,canOpen:s.canOpen,canClose:s.canClose,azubi:s.azubi,exemptRotation:!!s.exemptRotation,note:s.note});
+  const cancelForm = () => setForm(null);
+  const patchForm = (p) => setForm(f => ({...f,...p}));
+  const saveForm = () => {
+    if(!form) return;
+    const name = (form.name||'').trim() || 'Ohne Name';
+    if(form.id==null) {
+      const nw = Array.from({length:7},()=>['-','-','-','-','-']);
+      setStaff(st => [...st, {id:nextId,name,house:form.house,contract:form.hours,canOpen:form.canOpen,canClose:form.canClose,azubi:form.azubi,exemptRotation:!!form.exemptRotation,note:form.note||'',weeks:nw}]);
+      setNextId(n=>n+1);
+    } else {
+      setStaff(st => st.map(s => s.id===form.id ? {...s,name,house:form.house,contract:form.hours,canOpen:form.canOpen,canClose:form.canClose,azubi:form.azubi,exemptRotation:!!form.exemptRotation,note:form.note||''} : s));
+    }
+    setForm(null);
+  };
+  const deleteStaff = (id) => { setStaff(st => st.filter(s => s.id!==id)); setForm(null); };
+
+  // ===== PICKER =====
+  const openPicker = (id,day) => {
+    const s = staff.find(x=>x.id===id);
+    const v = s ? cur(s)[day] : '-';
+    let start='07:00',end='15:00';
+    if(v&&v!=='-'){const p=v.split('-');start=p[0];end=p[1];}
+    setPicker({id,day,start,end});
+  };
+  const commitShift = (v) => {
+    if(!picker) return;
+    setStaff(st => st.map(s => s.id===picker.id ? {...s, weeks: s.weeks.map((wk,k) => k===wi ? wk.map((c,i)=>i===picker.day?v:c) : wk)} : s));
+    setPicker(null);
+  };
+
+  // ===== AUTO-DISTRIBUTE =====
+  const autoDistribute = () => {
+    if(!window.confirm(lang==='de'
+      ? 'Alle 7 Wochen werden neu verteilt. Bestehende Einträge werden überschrieben. Fortfahren?'
+      : 'Les 7 semaines seront redistribuées. Les entrées existantes seront écrasées. Continuer ?'
+    )) return;
+    setStaff(fairDistribute(staff));
+  };
+
+  // ===== RENDER =====
+  const houseName = (h) => h==='hein' ? t.hein : t.chateau;
+
+  // Nav styles
+  const navBtn = (active) => ({
+    padding:'8px 15px', border:'none', borderRadius:8, fontSize:13, fontWeight:active?800:600,
+    color:active?'#2a2622':'#7a7268', background:active?'#fff':'transparent',
+    boxShadow:active?'0 1px 2px rgba(0,0,0,.1)':'none', cursor:'pointer',
+  });
+  const langBtn = (active) => ({
+    padding:'8px 13px', border:'none', borderRadius:8, fontSize:13, fontWeight:active?800:700,
+    color:active?'#2a2622':'#7a7268', background:active?'#fff':'transparent',
+    boxShadow:active?'0 1px 2px rgba(0,0,0,.1)':'none', cursor:'pointer',
+  });
+
+  return (
+    <div style={{maxWidth:1140,margin:'0 auto',padding:'24px 28px 60px',fontFamily:"'Hanken Grotesk',system-ui,sans-serif",color:'#2a2622',WebkitFontSmoothing:'antialiased'}}>
+      {/* TOP BAR */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:22,flexWrap:'wrap',gap:14}}>
+        <div style={{display:'flex',alignItems:'center',gap:13}}>
+          <div style={{width:40,height:40,borderRadius:11,background:'#3d9e8e',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:800,fontSize:17}}>S</div>
+          <div>
+            <div style={{fontSize:17,fontWeight:800,letterSpacing:'-0.01em'}}>{t.brand}</div>
+            <div style={{fontSize:12.5,color:'#8a8278',marginTop:1,display:'flex',alignItems:'center',gap:7}}>
+              <span style={{display:'inline-flex',alignItems:'center',gap:4}}><span style={{width:8,height:8,borderRadius:'50%',background:HOUSE_META.hein.dot}}/>{t.hein}</span>
+              <span style={{color:'#cfc8bc'}}>×</span>
+              <span style={{display:'inline-flex',alignItems:'center',gap:4}}><span style={{width:8,height:8,borderRadius:'50%',background:HOUSE_META.chateau.dot}}/>{t.chateau}</span>
+            </div>
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <div style={{display:'flex',background:'#e7e1d7',borderRadius:11,padding:3}}>
+            <button onClick={()=>setLang('de')} style={langBtn(lang==='de')}>DE</button>
+            <button onClick={()=>setLang('fr')} style={langBtn(lang==='fr')}>FR</button>
+          </div>
+          <div style={{display:'flex',background:'#e7e1d7',borderRadius:11,padding:3}}>
+            <button onClick={()=>setScreen('team')} style={navBtn(screen==='team')}>{t.tabTeam}</button>
+            <button onClick={()=>setScreen('overview')} style={navBtn(screen==='overview')}>{t.tabOverview}</button>
+            <button onClick={()=>setScreen('week')} style={navBtn(screen==='week')}>{t.tabWeek}</button>
+          </div>
+        </div>
+      </div>
+
+      {/* ============ TEAM ============ */}
+      {screen==='team' && <TeamView t={t} staff={staff} houseMembers={houseMembers} openNew={openNew} openEdit={openEdit} deleteStaff={deleteStaff} houseName={houseName}/>}
+
+      {/* ============ OVERVIEW ============ */}
+      {screen==='overview' && <OverviewView t={t} lang={lang} staff={staff} houseMembers={houseMembers} countOC={countOC} cur={cur} wi={wi} houseName={houseName} goWeek={()=>setScreen('week')} autoDistribute={autoDistribute}/>}
+
+      {/* ============ WEEK ============ */}
+      {screen==='week' && <WeekView t={t} lang={lang} staff={staff} wi={wi} setWeekIndex={setWeekIndex} cur={cur} openPicker={openPicker} spaetTime={spaetTime} closeStr={closeStr} spaetStart={spaetStart} houseName={houseName}/>}
+
+      {/* ============ FORM MODAL ============ */}
+      {form && <FormModal t={t} form={form} patchForm={patchForm} saveForm={saveForm} cancelForm={cancelForm} deleteStaff={deleteStaff}/>}
+
+      {/* ============ PICKER MODAL ============ */}
+      {picker && <PickerModal t={t} picker={picker} setPicker={setPicker} commitShift={commitShift} staff={staff} spaetStart={spaetStart} closeStr={closeStr}/>}
+    </div>
+  );
+}
+
+/* ==================== TEAM VIEW ==================== */
+function TeamView({t,staff,houseMembers,openNew,openEdit,deleteStaff,houseName}) {
+  const houses = ['hein','chateau'];
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10}}>
+        <div>
+          <div style={{fontSize:18,fontWeight:800}}>{t.teamTitle}</div>
+          <div style={{fontSize:13,color:'#8a8278',marginTop:2}}>{t.teamSub}</div>
+        </div>
+        <button onClick={openNew} style={{border:'none',background:'#3d9e8e',color:'#fff',borderRadius:10,padding:'11px 16px',fontSize:13,fontWeight:700,cursor:'pointer'}}>{t.addPerson}</button>
+      </div>
+      {houses.map(hid => {
+        const meta = HOUSE_META[hid];
+        const members = houseMembers(hid);
+        return (
+          <div key={hid} style={{background:'#fff',border:'1px solid #e9e3da',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 3px rgba(0,0,0,.04)',marginBottom:16}}>
+            <div style={{padding:'13px 20px',borderBottom:'1px solid #efeae2',display:'flex',alignItems:'center',gap:9,background:meta.bg}}>
+              <span style={{width:11,height:11,borderRadius:'50%',background:meta.dot}}/>
+              <span style={{fontSize:15,fontWeight:800}}>{houseName(hid)}</span>
+              <span style={{fontSize:12,color:'#8a8278'}}>· {members.length} {t.staffWord}</span>
+            </div>
+            {members.map(m => (
+              <div key={m.id} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 20px',borderBottom:'1px solid #f4f0e9'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap'}}>
+                    <span style={{fontWeight:700,fontSize:14}}>{m.name}</span>
+                    <span style={{color:'#8a8278',fontSize:12.5,fontVariantNumeric:'tabular-nums'}}>{m.contract} h</span>
+                    {m.azubi && <Badge label={t.badgeAzubi} bg="#fdf3e0" fg="#a17520"/>}
+                    {m.canOpen && <Badge label={t.badgeOpen} bg="#e8f5f2" fg="#2d7a6c"/>}
+                    {m.canClose && <Badge label={t.badgeClose} bg="#fef7e8" fg="#8a6d20"/>}
+                  </div>
+                  {m.note && <div style={{fontSize:12,color:'#a8a094',marginTop:3}}>{m.note}</div>}
+                </div>
+                <button onClick={()=>openEdit(m)} style={{border:'1px solid #e3ddd2',background:'#fff',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:700,color:'#4a443c',cursor:'pointer'}}>{t.edit}</button>
+                <button onClick={()=>deleteStaff(m.id)} style={{border:'1px solid #e8c8b8',background:'#fff',borderRadius:8,padding:'6px 11px',fontSize:12,fontWeight:700,color:'#b05030',cursor:'pointer'}}>{t.del}</button>
+              </div>
+            ))}
+            {members.length===0 && <div style={{padding:'16px 20px',fontSize:13,color:'#a8a094'}}>{t.emptyHouse}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Badge({label,bg,fg}) {
+  return <span style={{background:bg,color:fg,borderRadius:4,padding:'0 5px',fontSize:9.5,fontWeight:700}}>{label}</span>;
+}
+
+/* ==================== OVERVIEW VIEW ==================== */
+function OverviewView({t,lang,staff,houseMembers,countOC,cur,wi,houseName,goWeek,autoDistribute}) {
+  const weekLabel = (lang==='fr'?'Semaine ':'Woche ') + (wi+1) + ' / 7';
+
+  // Rotation fairness
+  const rotStaff = staff.filter(s => !s.exemptRotation);
+  const ocList = rotStaff.map(s => ({s, oc: countOC(s)}));
+
+  // Gewichtete Soll-Werte (wie in fairDistribute)
+  const { targetOMap, targetSMap } = computeTargets(staff);
+
+  // Balanced = alle innerhalb ±1 vom eigenen Soll
+  const balanced = ocList.every(({s,oc}) => {
+    const tO = targetOMap[s.id] || 0;
+    const tS = targetSMap[s.id] || 0;
+    return (!s.canOpen || Math.abs(oc.o - tO) <= 1) && (!s.canClose || Math.abs(oc.c - tS) <= 1);
+  });
+  const exempt = staff.filter(s => s.exemptRotation).map(s => s.name);
+
+  // House totals
+  const houseOC = (hid) => {
+    const members = houseMembers(hid);
+    let o=0,c=0;
+    members.forEach(s => { const oc = countOC(s); o+=oc.o; c+=oc.c; });
+    return {o,c,count:members.length};
+  };
+  const heinOC = houseOC('hein');
+  const chatOC = houseOC('chateau');
+  const totalO = heinOC.o + chatOC.o;
+  const totalC = heinOC.c + chatOC.c;
+
+  // Day coverage (current week)
+  const dayCov = [0,1,2,3,4].map(i => ({
+    F: staff.filter(x => isOpen(cur(x)[i])).length,
+    S: staff.filter(x => isClose(cur(x)[i])).length,
+  }));
+
+  // Issues
+  const issues = [];
+  ['hein','chateau'].forEach(hid => {
+    const members = houseMembers(hid);
+    const dc = [0,1,2,3,4].map(i => ({
+      F: members.filter(x => isOpen(cur(x)[i])).length,
+      S: members.filter(x => isClose(cur(x)[i])).length,
+    }));
+    const closeShort = dc.map((x,i)=>x.S<1?t.days[i]:null).filter(Boolean);
+    const openShort = dc.map((x,i)=>x.F<1?t.days[i]:null).filter(Boolean);
+    const parts = [];
+    if(closeShort.length) parts.push(`${t.coverGapClose} (${t.onDays} ${closeShort.join(', ')})`);
+    if(openShort.length) parts.push(`${t.coverGapOpen} (${t.onDays} ${openShort.join(', ')})`);
+    if(parts.length) issues.push({icon:'!',warn:true,title:houseName(hid),body:parts.join(' · ')});
+  });
+
+  // Check for people who should do both Ö and S but have 0
+  const missingDuties = ocList.filter(({s,oc}) => (oc.o===0 && s.canOpen) || (oc.c===0 && s.canClose));
+  if(missingDuties.length > 0) {
+    const names = missingDuties.map(({s,oc}) => {
+      const parts = [];
+      if(oc.o===0 && s.canOpen) parts.push(lang==='de'?'keine Ö':'pas de O');
+      if(oc.c===0 && s.canClose) parts.push(lang==='de'?'keine S':'pas de F');
+      return `${s.name} (${parts.join(', ')})`;
+    });
+    issues.push({
+      icon:'!', warn:true,
+      title: lang==='de' ? 'Personen ohne Öffnung/Schließung' : 'Personnes sans ouverture/fermeture',
+      body: (lang==='de'
+        ? 'Jede:r (außer Ausgenommene) sollte Öffnungen und Schließungen übernehmen. Noch ohne: '
+        : 'Chacun·e (sauf exclus) devrait avoir des ouvertures et fermetures. Manquent : ')
+        + names.join(', ')
+    });
+  }
+
+  if(issues.length===0) issues.push({icon:'✓',warn:false,title:t.allGood,body:t.allGoodBody});
+
+  const covOk = {background:'#e8f5f2',color:'#2d7a6c',borderRadius:5,padding:'1px 5px',fontWeight:700,fontSize:9.5};
+  const covBad = {background:'#fde8e4',color:'#b05030',borderRadius:5,padding:'1px 5px',fontWeight:700,fontSize:9.5};
+
+  return (
+    <div>
+      {/* Main title */}
+      <div style={{background:'#fff',border:'1px solid #e9e3da',borderRadius:16,padding:'24px 26px',boxShadow:'0 1px 3px rgba(0,0,0,.04)',marginBottom:18}}>
+        <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+          <div>
+            <div style={{fontSize:16,fontWeight:800,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              {t.ovTitle}
+              <span style={{fontSize:11,fontWeight:700,color:'#8a8278',background:'#efeae2',padding:'2px 9px',borderRadius:20}}>{weekLabel}</span>
+            </div>
+            <div style={{fontSize:13,color:'#8a8278',marginTop:3,maxWidth:640}}>{t.ovSub}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Per-person Ö/S distribution */}
+      <div style={{background:'#fff',border:'1px solid #e9e3da',borderRadius:16,padding:'20px 24px',boxShadow:'0 1px 3px rgba(0,0,0,.04)',marginBottom:18}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+          <div style={{fontSize:14,fontWeight:800}}>{t.ovTitle}</div>
+          <span style={{fontSize:12,fontWeight:700,padding:'3px 11px',borderRadius:20,
+            background:balanced?'#e8f5f2':'#fef7e8',color:balanced?'#2d7a6c':'#a17520'}}>
+            {balanced?t.fairBalanced:t.fairUnbalanced}
+          </span>
+        </div>
+        <div style={{fontSize:12,color:'#8a8278',margin:'6px 0 14px'}}>{t.ovSub}</div>
+
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:8}}>
+          {ocList.map(({s,oc}) => {
+            const tO = targetOMap[s.id] || 0;
+            const tS = targetSMap[s.id] || 0;
+            const missingO = oc.o === 0 && s.canOpen;
+            const missingC = oc.c === 0 && s.canClose;
+            const overO = s.canOpen && Math.abs(oc.o - tO) > 1;
+            const overS = s.canClose && Math.abs(oc.c - tS) > 1;
+            const hasProblem = missingO || missingC || overO || overS;
+            return (
+              <div key={s.id} style={{
+                display:'flex',alignItems:'center',justifyContent:'space-between',
+                border: hasProblem ? '1px solid #e8c8b8' : '1px solid #ece7df',
+                background: hasProblem ? '#fef6f4' : '#fff',
+                borderRadius:10,padding:'9px 12px',
+              }}>
+                <span style={{display:'flex',alignItems:'center',gap:7,fontWeight:700,fontSize:13}}>
+                  <span style={{width:9,height:9,borderRadius:'50%',background:HOUSE_META[s.house].dot,display:'inline-block',flexShrink:0}}/>
+                  {s.name}
+                  {hasProblem && <span style={{fontSize:10,color:'#b05030'}}>⚠</span>}
+                </span>
+                <span style={{display:'flex',gap:10,fontSize:12,fontVariantNumeric:'tabular-nums'}}>
+                  <span style={{fontWeight:800,color: (missingO||overO) ? '#b05030' : '#2a2622'}}>{t.covOpen} {oc.o}<span style={{fontWeight:500,color:'#a8a094'}}>/{tO}</span></span>
+                  <span style={{fontWeight:800,color: (missingC||overS) ? '#b05030' : '#2a2622'}}>{t.covClose} {oc.c}<span style={{fontWeight:500,color:'#a8a094'}}>/{tS}</span></span>
+                </span>
+              </div>
+            );
+          })}
+          {/* Exempt staff with 0/0 */}
+          {staff.filter(s => s.exemptRotation).map(s => (
+            <div key={s.id} style={{
+              display:'flex',alignItems:'center',justifyContent:'space-between',
+              border:'1px solid #ece7df', background:'#faf8f4',
+              borderRadius:10,padding:'9px 12px', opacity:0.7,
+            }}>
+              <span style={{display:'flex',alignItems:'center',gap:7,fontWeight:700,fontSize:13}}>
+                <span style={{width:9,height:9,borderRadius:'50%',background:HOUSE_META[s.house].dot,display:'inline-block',flexShrink:0}}/>
+                {s.name}
+                <span style={{fontSize:9.5,fontWeight:600,color:'#8a8278',background:'#e7e1d7',padding:'1px 6px',borderRadius:8}}>{lang==='de'?'ausg.':'excl.'}</span>
+              </span>
+              <span style={{display:'flex',gap:10,fontSize:12,fontVariantNumeric:'tabular-nums'}}>
+                <span style={{fontWeight:800,color:'#a8a094'}}>{t.covOpen} 0</span>
+                <span style={{fontWeight:800,color:'#a8a094'}}>{t.covClose} 0</span>
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Warning: people with 0 openings or 0 closings */}
+        {(() => {
+          const missing = ocList.filter(({s,oc}) => (oc.o===0 && s.canOpen) || (oc.c===0 && s.canClose));
+          if (missing.length === 0) return null;
+          return (
+            <div style={{marginTop:12,padding:'10px 14px',background:'#fef6f4',border:'1px solid #e8c8b8',borderRadius:10}}>
+              <div style={{fontSize:12.5,fontWeight:700,color:'#b05030',marginBottom:4}}>
+                {lang==='de' ? '⚠ Noch nicht eingeteilt:' : '⚠ Pas encore assigné :'}
+              </div>
+              {missing.map(({s,oc}) => (
+                <div key={s.id} style={{fontSize:12,color:'#7a4030',lineHeight:1.6}}>
+                  <strong>{s.name}</strong>
+                  {oc.o===0 && s.canOpen && oc.c===0 && s.canClose
+                    ? (lang==='de' ? ' — hat weder Öffnungen noch Schließungen' : ' — n\'a ni ouvertures ni fermetures')
+                    : oc.o===0 && s.canOpen
+                      ? (lang==='de' ? ' — hat noch keine Öffnungen (darf aber öffnen)' : ' — n\'a pas encore d\'ouvertures (mais peut ouvrir)')
+                      : (lang==='de' ? ' — hat noch keine Schließungen (darf aber schließen)' : ' — n\'a pas encore de fermetures (mais peut fermer)')
+                  }
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* House comparison */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:18,marginBottom:18}}>
+        {[{hid:'hein',oc:heinOC},{hid:'chateau',oc:chatOC}].map(({hid,oc}) => {
+          const meta = HOUSE_META[hid];
+          const hMembers = houseMembers(hid);
+          const eligibleCount = hMembers.filter(s=>!s.exemptRotation).length;
+          const teamSollO = hMembers.filter(s=>!s.exemptRotation&&s.canOpen).reduce((sum,s) => sum + (targetOMap[s.id]||0), 0);
+          const teamSollS = hMembers.filter(s=>!s.exemptRotation&&s.canClose).reduce((sum,s) => sum + (targetSMap[s.id]||0), 0);
+          const oDiff = oc.o - teamSollO;
+          const cDiff = oc.c - teamSollS;
+          const diffLabel = (diff) => diff > 0 ? `+${diff}` : `${diff}`;
+          const diffColor = (diff) => Math.abs(diff) <= 2 ? '#3d9e8e' : (diff > 0 ? '#c4953a' : '#b05030');
+          const diffBg = (diff) => Math.abs(diff) <= 2 ? '#e8f5f2' : (diff > 0 ? '#fef7e8' : '#fde8e4');
+          return (
+            <div key={hid} style={{background:'#fff',border:'1px solid #e9e3da',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 3px rgba(0,0,0,.04)'}}>
+              <div style={{padding:'14px 20px',borderBottom:'1px solid #efeae2',display:'flex',alignItems:'center',gap:10,background:meta.bg}}>
+                <span style={{width:12,height:12,borderRadius:'50%',background:meta.dot}}/>
+                <span style={{fontSize:15,fontWeight:800}}>{houseName(hid)}</span>
+                <span style={{fontSize:12,color:'#8a8278'}}>· {oc.count} {t.staffWord} ({eligibleCount} {lang==='fr'?'actifs':'aktiv'})</span>
+              </div>
+              <div style={{padding:'18px 20px'}}>
+                {/* Team output */}
+                <div style={{fontSize:10,fontWeight:700,color:'#8a8278',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:8}}>
+                  {lang==='fr'?'Prestations de l\'équipe':'Leistung des Teams'} ({lang==='fr'?'Soll selon heures':'Soll nach Stunden'})
+                </div>
+                <div style={{display:'flex',gap:24}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,fontWeight:700,color:'#8a8278'}}>{t.openings}</div>
+                    <div style={{display:'flex',alignItems:'baseline',gap:5,marginTop:3}}>
+                      <span style={{fontSize:26,fontWeight:800,fontVariantNumeric:'tabular-nums'}}>{oc.o}</span>
+                      <span style={{fontSize:13,color:'#a8a094',fontWeight:600}}>/ {teamSollO}</span>
+                    </div>
+                    <span style={{fontSize:10,fontWeight:700,padding:'1px 6px',borderRadius:10,color:diffColor(oDiff),background:diffBg(oDiff)}}>
+                      {Math.abs(oDiff) <= 1 ? '✓' : diffLabel(oDiff)}
+                    </span>
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,fontWeight:700,color:'#8a8278'}}>{t.closings}</div>
+                    <div style={{display:'flex',alignItems:'baseline',gap:5,marginTop:3}}>
+                      <span style={{fontSize:26,fontWeight:800,fontVariantNumeric:'tabular-nums'}}>{oc.c}</span>
+                      <span style={{fontSize:13,color:'#a8a094',fontWeight:600}}>/ {teamSollS}</span>
+                    </div>
+                    <span style={{fontSize:10,fontWeight:700,padding:'1px 6px',borderRadius:10,color:diffColor(cDiff),background:diffBg(cDiff)}}>
+                      {Math.abs(cDiff) <= 1 ? '✓' : diffLabel(cDiff)}
+                    </span>
+                  </div>
+                </div>
+                {/* Location need */}
+                <div style={{marginTop:14,padding:'10px 12px',background:'#faf8f4',borderRadius:8,fontSize:11,color:'#8a8278',lineHeight:1.5}}>
+                  <strong>{lang==='fr'?'Soll de l\'équipe':'Team-Soll'}:</strong> {teamSollO} Ö + {teamSollS} S {lang==='fr'?'(pondéré par heures)':'(gewichtet nach Stunden)'}
+                  {Math.abs(oDiff) <= 2 && Math.abs(cDiff) <= 2 ? (
+                    <span> → ✓ {lang==='fr'?'équilibré':'ausgewogen'}</span>
+                  ) : (
+                    <span> → {lang==='fr'?'écart':'Abweichung'}: Ö {oDiff>0?'+':''}{oDiff}, S {cDiff>0?'+':''}{cDiff}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Calculation: why the difference? */}
+      <CalculationCard t={t} lang={lang} heinOC={heinOC} chatOC={chatOC} totalO={totalO} totalC={totalC} houseMembers={houseMembers} houseName={houseName}/>
+
+      {/* Day coverage (current week) */}
+      <div style={{background:'#fff',border:'1px solid #e9e3da',borderRadius:16,padding:'20px 24px',boxShadow:'0 1px 3px rgba(0,0,0,.04)',marginBottom:18}}>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>{t.covTitle}</div>
+        <div style={{fontSize:12,color:'#8a8278',marginBottom:14}}>{t.covSub} <span style={{fontSize:11,fontWeight:700,color:'#8a8278',background:'#efeae2',padding:'2px 8px',borderRadius:20}}>{weekLabel}</span></div>
+        <div style={{display:'flex',gap:8}}>
+          {t.days.map((d,i) => (
+            <div key={i} style={{flex:1,border:'1px solid #ece7df',borderRadius:10,padding:'10px 8px',textAlign:'center'}}>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:6}}>{d}</div>
+              <div style={{display:'flex',gap:4,justifyContent:'center'}}>
+                <span style={dayCov[i].F>=2?covOk:covBad}>{t.covOpen} {dayCov[i].F}</span>
+                <span style={dayCov[i].S>=2?covOk:covBad}>{t.covClose} {dayCov[i].S}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Issues */}
+      <div style={{background:'#fff',border:'1px solid #e9e3da',borderRadius:16,padding:'20px 24px',boxShadow:'0 1px 3px rgba(0,0,0,.04)',marginBottom:18}}>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:8}}>{t.whatsMissing}</div>
+        {issues.map((it,i) => (
+          <div key={i} style={{display:'flex',alignItems:'flex-start',gap:13,padding:'11px 0',borderBottom:'1px solid #f1ece4'}}>
+            <div style={{width:26,height:26,borderRadius:8,background:it.warn?'#d05040':'#3d9e8e',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:14,flexShrink:0}}>{it.icon}</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13.5,fontWeight:700}}>{it.title}</div>
+              <div style={{fontSize:12.5,color:'#8a8278',marginTop:2}}>{it.body}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Small re-distribute button */}
+      <div style={{display:'flex',gap:10,marginBottom:18}}>
+        <button onClick={autoDistribute} style={{flex:1,padding:14,border:'1px solid #e3ddd2',borderRadius:11,background:'#fff',color:'#4a443c',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+          {lang==='de' ? '🔄 Neu verteilen' : '🔄 Redistribuer'}
+        </button>
+        <button onClick={goWeek} style={{flex:2,padding:14,border:'none',borderRadius:11,background:'#3d9e8e',color:'#fff',fontSize:14,fontWeight:700,cursor:'pointer'}}>{t.cta}</button>
+      </div>
+    </div>
+  );
+}
+
+/* ==================== CALCULATION CARD ==================== */
+function CalculationCard({t,lang,heinOC,chatOC,totalO,totalC,houseMembers,houseName}) {
+  const de = lang==='de';
+  const heinMembers = houseMembers('hein');
+  const chatMembers = houseMembers('chateau');
+  const heinClosers = heinMembers.filter(s => s.canClose).length;
+  const chatClosers = chatMembers.filter(s => s.canClose).length;
+  const heinOpeners = heinMembers.filter(s => s.canOpen).length;
+  const chatOpeners = chatMembers.filter(s => s.canOpen).length;
+  const totalClosers = heinClosers + chatClosers;
+  const totalOpeners = heinOpeners + chatOpeners;
+
+  const heinClosePct = totalC > 0 ? Math.round(heinOC.c / totalC * 100) : 0;
+  const chatClosePct = totalC > 0 ? Math.round(chatOC.c / totalC * 100) : 0;
+  const heinOpenPct = totalO > 0 ? Math.round(heinOC.o / totalO * 100) : 0;
+  const chatOpenPct = totalO > 0 ? Math.round(chatOC.o / totalO * 100) : 0;
+
+  const heinCloserPct = totalClosers > 0 ? Math.round(heinClosers / totalClosers * 100) : 0;
+  const chatCloserPct = totalClosers > 0 ? Math.round(chatClosers / totalClosers * 100) : 0;
+
+  const Row = ({label, hein, chat, unit, color}) => (
+    <div style={{display:'flex',alignItems:'center',gap:0,borderBottom:'1px solid #f1ece4',fontSize:13}}>
+      <div style={{width:'40%',padding:'10px 14px',fontWeight:600,color:'#5a5248'}}>{label}</div>
+      <div style={{width:'30%',padding:'10px 14px',textAlign:'center',fontWeight:700,fontVariantNumeric:'tabular-nums',color:color||'#2a2622'}}>{hein}{unit||''}</div>
+      <div style={{width:'30%',padding:'10px 14px',textAlign:'center',fontWeight:700,fontVariantNumeric:'tabular-nums',color:color||'#2a2622'}}>{chat}{unit||''}</div>
+    </div>
+  );
+
+  const FormulaRow = ({heinVal, chatVal, total, heinPct, chatPct, heinName, chatName}) => (
+    <div style={{display:'flex',alignItems:'stretch',gap:0,borderBottom:'1px solid #f1ece4',background:'#fdfcf8'}}>
+      <div style={{width:'40%',padding:'4px 14px 8px',fontSize:10.5,color:'#a8a094',fontStyle:'italic'}}>
+        {de ? 'Rechnung:' : 'Calcul :'}
+      </div>
+      <div style={{width:'30%',padding:'4px 14px 8px',textAlign:'center'}}>
+        <span style={{fontSize:10.5,color:'#8a8278',fontVariantNumeric:'tabular-nums',background:'#f4f0e9',padding:'2px 7px',borderRadius:5}}>
+          {heinVal} ÷ {total} = {heinPct}%
+        </span>
+      </div>
+      <div style={{width:'30%',padding:'4px 14px 8px',textAlign:'center'}}>
+        <span style={{fontSize:10.5,color:'#8a8278',fontVariantNumeric:'tabular-nums',background:'#f4f0e9',padding:'2px 7px',borderRadius:5}}>
+          {chatVal} ÷ {total} = {chatPct}%
+        </span>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{background:'#fff',border:'1px solid #e9e3da',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 3px rgba(0,0,0,.04)',marginBottom:18}}>
+      <div style={{padding:'18px 22px',borderBottom:'1px solid #efeae2',background:'#fdfcf8'}}>
+        <div style={{fontSize:14,fontWeight:800,display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontSize:16}}>📊</span>
+          {de ? 'Verteilung nach Hausgröße & Stunden' : 'Répartition par taille de maison & heures'}
+        </div>
+        <div style={{fontSize:12.5,color:'#8a8278',marginTop:4,lineHeight:1.5}}>
+          {de
+            ? 'Die Verteilung berücksichtigt die Anzahl der berechtigten Personen pro Haus und deren Wochenstunden. Wer mehr Tage arbeitet, übernimmt proportional mehr Öffnungen und Schließungen.'
+            : 'La répartition tient compte du nombre de personnes autorisées par maison et de leurs heures hebdomadaires. Qui travaille plus de jours prend proportionnellement plus d\'ouvertures et fermetures.'}
+        </div>
+      </div>
+
+      {/* Table header */}
+      <div style={{display:'flex',alignItems:'center',gap:0,borderBottom:'1px solid #efeae2',background:'#faf8f4',fontSize:11,fontWeight:700,color:'#8a8278',textTransform:'uppercase',letterSpacing:'.04em'}}>
+        <div style={{width:'40%',padding:'9px 14px'}}/>
+        <div style={{width:'30%',padding:'9px 14px',textAlign:'center',display:'flex',alignItems:'center',justifyContent:'center',gap:5}}>
+          <span style={{width:8,height:8,borderRadius:'50%',background:HOUSE_META.hein.dot}}/> {houseName('hein')}
+        </div>
+        <div style={{width:'30%',padding:'9px 14px',textAlign:'center',display:'flex',alignItems:'center',justifyContent:'center',gap:5}}>
+          <span style={{width:8,height:8,borderRadius:'50%',background:HOUSE_META.chateau.dot}}/> {houseName('chateau')}
+        </div>
+      </div>
+
+      <Row label={de?'Mitarbeitende gesamt':'Personnel total'} hein={heinMembers.length} chat={chatMembers.length}/>
+      <Row label={de?'Davon dürfen schließen':'Peuvent fermer'} hein={heinClosers} chat={chatClosers}/>
+      <Row label={de?'Davon dürfen öffnen':'Peuvent ouvrir'} hein={heinOpeners} chat={chatOpeners}/>
+
+      <div style={{borderBottom:'1px solid #efeae2',height:1,background:'#e9e3da'}}/>
+
+      <Row label={de?'Schließungen (7 Wochen)':'Fermetures (7 sem.)'} hein={heinOC.c} chat={chatOC.c}/>
+      <Row label={de?'→ Anteil Schließungen':'→ Part fermetures'} hein={`${heinClosePct}%`} chat={`${chatClosePct}%`} color='#8a6d20'/>
+      <FormulaRow
+        heinVal={heinOC.c} chatVal={chatOC.c} total={totalC}
+        heinPct={heinClosePct} chatPct={chatClosePct}
+        heinName={houseName('hein')} chatName={houseName('chateau')}
+      />
+      <Row label={de?'Öffnungen (7 Wochen)':'Ouvertures (7 sem.)'} hein={heinOC.o} chat={chatOC.o}/>
+      <Row label={de?'→ Anteil Öffnungen':'→ Part ouvertures'} hein={`${heinOpenPct}%`} chat={`${chatOpenPct}%`} color='#2d7a6c'/>
+      <FormulaRow
+        heinVal={heinOC.o} chatVal={chatOC.o} total={totalO}
+        heinPct={heinOpenPct} chatPct={chatOpenPct}
+        heinName={houseName('hein')} chatName={houseName('chateau')}
+      />
+
+      {/* Visual bar */}
+      <div style={{padding:'16px 22px',borderTop:'1px solid #efeae2',background:'#fdfcf8'}}>
+        <div style={{fontSize:11,fontWeight:700,color:'#8a8278',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:8}}>
+          {de ? 'Anteil Schließungen' : 'Part des fermetures'}
+        </div>
+        <div style={{display:'flex',height:28,borderRadius:8,overflow:'hidden',gap:2}}>
+          <div style={{width:`${heinClosePct}%`,background:HOUSE_META.hein.dot,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:11,fontWeight:800,borderRadius:'8px 0 0 8px',minWidth:40}}>
+            {heinClosePct}%
+          </div>
+          <div style={{width:`${chatClosePct}%`,background:HOUSE_META.chateau.dot,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:11,fontWeight:800,borderRadius:'0 8px 8px 0',minWidth:40}}>
+            {chatClosePct}%
+          </div>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',marginTop:5}}>
+          <span style={{fontSize:10,color:'#a8a094',fontVariantNumeric:'tabular-nums'}}>{heinOC.c} ÷ {totalC} × 100</span>
+          <span style={{fontSize:10,color:'#a8a094',fontVariantNumeric:'tabular-nums'}}>{chatOC.c} ÷ {totalC} × 100</span>
+        </div>
+
+        <div style={{fontSize:11,fontWeight:700,color:'#8a8278',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:8,marginTop:16}}>
+          {de ? 'Anteil Öffnungen' : 'Part des ouvertures'}
+        </div>
+        <div style={{display:'flex',height:28,borderRadius:8,overflow:'hidden',gap:2}}>
+          <div style={{width:`${heinOpenPct}%`,background:HOUSE_META.hein.dot,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:11,fontWeight:800,borderRadius:'8px 0 0 8px',minWidth:40}}>
+            {heinOpenPct}%
+          </div>
+          <div style={{width:`${chatOpenPct}%`,background:HOUSE_META.chateau.dot,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:11,fontWeight:800,borderRadius:'0 8px 8px 0',minWidth:40}}>
+            {chatOpenPct}%
+          </div>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',marginTop:5}}>
+          <span style={{fontSize:10,color:'#a8a094',fontVariantNumeric:'tabular-nums'}}>{heinOC.o} ÷ {totalO} × 100</span>
+          <span style={{fontSize:10,color:'#a8a094',fontVariantNumeric:'tabular-nums'}}>{chatOC.o} ÷ {totalO} × 100</span>
+        </div>
+      </div>
+
+      {/* Explanation */}
+      <div style={{padding:'16px 22px',borderTop:'1px solid #efeae2',background:'#faf8f4'}}>
+        <div style={{fontSize:12.5,color:'#5a5248',lineHeight:1.6}}>
+          {de ? (
+            <>
+              <strong>{houseName('chateau')}</strong> hat <strong>{chatClosers} von {totalClosers}</strong> Schließberechtigten ({chatCloserPct}%) und übernimmt <strong>{chatOC.c} von {totalC}</strong> Schließungen ({chatClosePct}%).
+              {' '}<strong>{houseName('hein')}</strong> hat <strong>{heinClosers}</strong> Schließberechtigte ({heinCloserPct}%) und kommt auf <strong>{heinOC.c}</strong> Schließungen ({heinClosePct}%).
+              <span style={{display:'block',marginTop:8,color:'#8a8278',fontSize:12}}>
+                ℹ️ Die Verteilung ist gewichtet: Wer mehr Wochenstunden hat (= mehr Arbeitstage), übernimmt proportional mehr Dienste. So bleibt die Belastung für alle bei ca. 50 % der Arbeitstage.
+              </span>
+              {heinMembers.filter(s=>!s.canClose).length > 0 && (
+                <span style={{display:'block',marginTop:4,color:'#8a8278',fontSize:12}}>
+                  ℹ️ {heinMembers.filter(s=>!s.canClose).length} Person(en) in {houseName('hein')} {heinMembers.filter(s=>!s.canClose).length===1?'darf':'dürfen'} nicht schließen ({heinMembers.filter(s=>!s.canClose).map(s=>s.name).join(', ')}).
+                </span>
+              )}
+              {chatMembers.filter(s=>!s.canClose).length > 0 && (
+                <span style={{display:'block',marginTop:4,color:'#8a8278',fontSize:12}}>
+                  ℹ️ {chatMembers.filter(s=>!s.canClose).length} Person(en) in {houseName('chateau')} {chatMembers.filter(s=>!s.canClose).length===1?'darf':'dürfen'} nicht schließen ({chatMembers.filter(s=>!s.canClose).map(s=>s.name).join(', ')}).
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <strong>{houseName('chateau')}</strong> compte <strong>{chatClosers} sur {totalClosers}</strong> personnes autorisées à fermer ({chatCloserPct}%) — d'où <strong>{chatOC.c} sur {totalC}</strong> fermetures ({chatClosePct}%).
+              {' '}<strong>{houseName('hein')}</strong> a <strong>{heinClosers}</strong> personnes autorisées ({heinCloserPct}%), soit <strong>{heinOC.c}</strong> fermetures ({heinClosePct}%).
+              <span style={{display:'block',marginTop:8,color:'#8a8278',fontSize:12}}>
+                ℹ️ La répartition est pondérée : qui travaille plus d'heures (= plus de jours) prend proportionnellement plus de services. Ainsi, la charge reste autour de 50 % des jours travaillés pour tous.
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ==================== WEEK VIEW ==================== */
+function WeekView({t,lang,staff,wi,setWeekIndex,cur,openPicker,spaetTime,closeStr,spaetStart,houseName}) {
+  const weekLabel = (lang==='fr'?'Semaine ':'Woche ') + (wi+1) + ' / 7';
+  const ruleLabel = wi<4 ? t.ruleLabel : (lang==='fr'?'Heures normales (dès sem. 5) :':'Regelzeit (ab Woche 5):');
+  const ruleText = (lang==='fr'?'Fermeture ':'Schließen ') + spaetTime;
+  const legSpaet = (lang==='fr'?'Soir (fermeture) ':'Spät (Schließung) ') + spaetTime;
+
+  const allStaff = [...staff].sort((a,b) => a.house===b.house?0:(a.house==='hein'?-1:1));
+
+  const wc = [0,1,2,3,4].map(i => ({F:staff.filter(x=>isOpen(cur(x)[i])).length, S:staff.filter(x=>isClose(cur(x)[i])).length}));
+  const covOk = {background:'#e8f5f2',color:'#2d7a6c',borderRadius:5,padding:'1px 5px',fontWeight:700,fontSize:9.5};
+  const covBad = {background:'#fde8e4',color:'#b05030',borderRadius:5,padding:'1px 5px',fontWeight:700,fontSize:9.5};
+
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:14,marginBottom:14}}>
+        <div style={{display:'flex',gap:16,alignItems:'center',flexWrap:'wrap'}}>
+          <div style={{display:'flex',alignItems:'center',gap:6}}>
+            <button onClick={()=>setWeekIndex(Math.max(0,wi-1))} style={{width:30,height:30,border:'1px solid #e3ddd2',background:'#fff',borderRadius:8,fontSize:15,fontWeight:700,color:'#4a443c',cursor:'pointer'}}>‹</button>
+            <div style={{fontSize:14,fontWeight:800,minWidth:108,textAlign:'center'}}>{weekLabel}</div>
+            <button onClick={()=>setWeekIndex(Math.min(6,wi+1))} style={{width:30,height:30,border:'1px solid #e3ddd2',background:'#fff',borderRadius:8,fontSize:15,fontWeight:700,color:'#4a443c',cursor:'pointer'}}>›</button>
+          </div>
+          <div style={{display:'flex',gap:14,alignItems:'center',fontSize:12.5,fontWeight:600,color:'#5a5248'}}>
+            <span style={{display:'flex',alignItems:'center',gap:6}}><span style={{width:11,height:11,borderRadius:'50%',background:HOUSE_META.hein.dot}}/>{t.hein}</span>
+            <span style={{display:'flex',alignItems:'center',gap:6}}><span style={{width:11,height:11,borderRadius:'50%',background:HOUSE_META.chateau.dot}}/>{t.chateau}</span>
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <div style={{display:'flex',alignItems:'center',gap:9,fontSize:12,color:'#5a5248',background:'#fefcf0',border:'1px solid #ede5c8',padding:'7px 13px',borderRadius:9}}>
+            <span style={{width:8,height:8,borderRadius:'50%',background:'#c4953a'}}/>
+            <strong style={{color:'#3a342c'}}>{ruleLabel}</strong> {ruleText}
+          </div>
+          <button onClick={()=>window.print()} style={{border:'1px solid #d8d0c2',background:'#fff',borderRadius:9,padding:'8px 14px',fontSize:13,fontWeight:700,color:'#4a443c',cursor:'pointer'}}>{t.print}</button>
+        </div>
+      </div>
+      <div style={{fontSize:12,color:'#a8a094',marginBottom:10}}>{t.weekHint}</div>
+
+      <div style={{background:'#fff',border:'1px solid #e9e3da',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 3px rgba(0,0,0,.04)'}}>
+        {/* Header */}
+        <div style={{display:'flex',borderBottom:'1px solid #efeae2'}}>
+          <div style={{width:152,padding:'11px 12px',fontSize:11,fontWeight:700,color:'#8a8278',textTransform:'uppercase',letterSpacing:'.05em'}}>{t.colEmployee}</div>
+          <div style={{display:'flex',flex:1}}>
+            {t.days.map((d,i) => (
+              <div key={i} style={{flex:1,padding:'8px 6px',borderLeft:'1px solid #f4f0e9',textAlign:'center'}}>
+                <div style={{fontWeight:700,color:'#3a342c'}}>{d}</div>
+                <div style={{display:'flex',gap:3,justifyContent:'center',marginTop:5}}>
+                  <span style={wc[i].F>=2?covOk:covBad}>{t.covOpen} {wc[i].F}</span>
+                  <span style={wc[i].S>=2?covOk:covBad}>{t.covClose} {wc[i].S}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Rows */}
+        {allStaff.map(s => {
+          const hColor = HOUSE_META[s.house].color;
+
+          return (
+            <div key={s.id} style={{display:'flex',borderBottom:'1px solid #f4f0e9',borderLeft:`4px solid ${hColor}`}}>
+              <div style={{width:148,padding:'9px 12px'}}>
+                <div style={{fontWeight:700,display:'flex',alignItems:'center',gap:5}}>
+                  <span style={{width:10,height:10,borderRadius:'50%',background:hColor,flexShrink:0,display:'inline-block'}}/>
+                  {s.name}{s.azubi && <span style={{color:'#c4953a'}}>*</span>}
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:4,marginTop:3}}>
+                  <span style={{color:'#8a8278',fontVariantNumeric:'tabular-nums'}}>{s.contract} h</span>
+                </div>
+              </div>
+              <div style={{display:'flex',flex:1}}>
+                {cur(s).map((v,i) => {
+                  const onClick = () => openPicker(s.id,i);
+                  if(isFrei(v)) return <div key={i} onClick={onClick} style={{flex:1,padding:'6px 5px',borderLeft:'1px solid #f4f0e9',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}><span style={{color:'#c4bdb1',fontWeight:600,fontSize:11}}>{t.frei}</span></div>;
+                  const op=isOpen(v),cl=isClose(v);
+                  const pal = op?{bg:'#e8f5f2',fg:'#2d7a6c',bd:'#c0e0d8'}:(cl?{bg:'#fef7e8',fg:'#8a6d20',bd:'#e8d8a8'}:{bg:'#f1efe9',fg:'#6f6860',bd:'#e4ded4'});
+                  return (
+                    <div key={i} onClick={onClick} style={{flex:1,padding:'6px 5px',borderLeft:'1px solid #f4f0e9',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>
+                      <div style={{background:pal.bg,color:pal.fg,border:`1px solid ${pal.bd}`,borderRadius:6,padding:'5px 3px',textAlign:'center',fontSize:9.5,fontWeight:700,width:'100%',fontVariantNumeric:'tabular-nums'}}>{v.replace('-','–')}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Legend */}
+        <div style={{padding:'12px 18px',display:'flex',gap:16,alignItems:'center',flexWrap:'wrap',background:'#faf8f4',fontSize:11,color:'#8a8278'}}>
+          <span style={{display:'flex',alignItems:'center',gap:6}}><span style={{width:10,height:10,borderRadius:3,background:'#e8f5f2',border:'1px solid #c0e0d8'}}/>{t.legFrueh}</span>
+          <span style={{display:'flex',alignItems:'center',gap:6}}><span style={{width:10,height:10,borderRadius:3,background:'#fef7e8',border:'1px solid #e8d8a8'}}/>{legSpaet}</span>
+          <span style={{display:'flex',alignItems:'center',gap:6}}><span style={{width:10,height:10,borderRadius:3,background:'#f1efe9',border:'1px solid #e4ded4'}}/>{t.legMitte}</span>
+          <span style={{marginLeft:'auto'}}>{t.legAzubi}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ==================== FORM MODAL ==================== */
+function FormModal({t,form,patchForm,saveForm,cancelForm,deleteStaff}) {
+  const segBtn = (active,color) => ({
+    flex:1,padding:11,borderRadius:10,border:active?`2px solid ${color}`:'1px solid #e0d9cc',
+    background:active?`${color}12`:'#faf8f4',color:'#2a2622',fontSize:13,fontWeight:700,cursor:'pointer',
+    display:'flex',alignItems:'center',justifyContent:'center',gap:7,
+  });
+  const toggleRow = (on) => ({
+    display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 14px',borderRadius:10,
+    border:'1px solid #e0d9cc',background:on?'#eef8f6':'#faf8f4',fontSize:13.5,fontWeight:600,color:'#2a2622',cursor:'pointer',
+  });
+  const pill = (on) => ({fontSize:12,fontWeight:800,padding:'3px 11px',borderRadius:20,color:on?'#fff':'#9a9288',background:on?'#3d9e8e':'#e7e1d7'});
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(40,32,24,.4)',display:'flex',alignItems:'center',justifyContent:'center',padding:20,zIndex:50}} onClick={cancelForm}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:18,width:440,maxWidth:'100%',maxHeight:'90vh',overflow:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.25)'}}>
+        <div style={{padding:'18px 24px',borderBottom:'1px solid #efeae2',fontSize:16,fontWeight:800}}>{form.id!=null?t.editPerson:t.newPerson}</div>
+        <div style={{padding:'20px 24px',display:'flex',flexDirection:'column',gap:16}}>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:'#6f6860',marginBottom:6}}>{t.fName}</div>
+            <input value={form.name} onChange={e=>patchForm({name:e.target.value})} placeholder={t.fNamePlace} style={{width:'100%',boxSizing:'border-box',border:'1px solid #e0d9cc',borderRadius:10,padding:'11px 13px',fontSize:14,background:'#faf8f4',fontFamily:'inherit'}}/>
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:'#6f6860',marginBottom:6}}>{t.fHouse}</div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>patchForm({house:'hein'})} style={segBtn(form.house==='hein','#3d9e8e')}><span style={{width:8,height:8,borderRadius:'50%',background:'#3d9e8e'}}/>{t.hein}</button>
+              <button onClick={()=>patchForm({house:'chateau'})} style={segBtn(form.house==='chateau','#c4953a')}><span style={{width:8,height:8,borderRadius:'50%',background:'#c4953a'}}/>{t.chateau}</button>
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:'#6f6860',marginBottom:6}}>{t.fHours}</div>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <button onClick={()=>patchForm({hours:Math.max(2,form.hours-1)})} style={{width:38,height:38,border:'1px solid #e0d9cc',background:'#faf8f4',borderRadius:10,fontSize:18,fontWeight:700,color:'#4a443c',cursor:'pointer'}}>−</button>
+              <div style={{fontSize:20,fontWeight:800,minWidth:64,textAlign:'center',fontVariantNumeric:'tabular-nums'}}>{form.hours} h</div>
+              <button onClick={()=>patchForm({hours:Math.min(60,form.hours+1)})} style={{width:38,height:38,border:'1px solid #e0d9cc',background:'#faf8f4',borderRadius:10,fontSize:18,fontWeight:700,color:'#4a443c',cursor:'pointer'}}>+</button>
+            </div>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:9}}>
+            <button onClick={()=>patchForm({canOpen:!form.canOpen})} style={toggleRow(form.canOpen)}><span>{t.fCanOpen}</span><span style={pill(form.canOpen)}>{form.canOpen?t.yes:t.no}</span></button>
+            <button onClick={()=>patchForm({canClose:!form.canClose})} style={toggleRow(form.canClose)}><span>{t.fCanClose}</span><span style={pill(form.canClose)}>{form.canClose?t.yes:t.no}</span></button>
+            <button onClick={()=>patchForm({azubi:!form.azubi})} style={toggleRow(form.azubi)}><span>{t.fAzubi}</span><span style={pill(form.azubi)}>{form.azubi?t.yes:t.no}</span></button>
+            <button onClick={()=>patchForm({exemptRotation:!form.exemptRotation})} style={toggleRow(form.exemptRotation)}><span>{t.fExempt}</span><span style={pill(form.exemptRotation)}>{form.exemptRotation?t.yes:t.no}</span></button>
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:'#6f6860',marginBottom:6}}>{t.fNote}</div>
+            <input value={form.note} onChange={e=>patchForm({note:e.target.value})} placeholder={t.fNotePlace} style={{width:'100%',boxSizing:'border-box',border:'1px solid #e0d9cc',borderRadius:10,padding:'11px 13px',fontSize:14,background:'#faf8f4',fontFamily:'inherit'}}/>
+          </div>
+        </div>
+        <div style={{padding:'16px 24px',borderTop:'1px solid #efeae2',display:'flex',gap:10,alignItems:'center'}}>
+          {form.id!=null && <button onClick={()=>deleteStaff(form.id)} style={{border:'1px solid #e8c8b8',background:'#fff',borderRadius:10,padding:'11px 14px',fontSize:13,fontWeight:700,color:'#b05030',cursor:'pointer'}}>{t.del}</button>}
+          <div style={{flex:1}}/>
+          <button onClick={cancelForm} style={{border:'1px solid #e3ddd2',background:'#fff',borderRadius:10,padding:'11px 16px',fontSize:13,fontWeight:700,color:'#4a443c',cursor:'pointer'}}>{t.cancel}</button>
+          <button onClick={saveForm} style={{border:'none',background:'#3d9e8e',color:'#fff',borderRadius:10,padding:'11px 18px',fontSize:13,fontWeight:700,cursor:'pointer'}}>{t.save}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ==================== PICKER MODAL ==================== */
+function PickerModal({t,picker,setPicker,commitShift,staff,spaetStart,closeStr}) {
+  const s = staff.find(x=>x.id===picker.id);
+  if(!s) return null;
+  const draft = `${picker.start}-${picker.end}`;
+  const dur = toMin(picker.end)-toMin(picker.start);
+  const dOpen = isOpen(draft), dClose = isClose(draft);
+  let kindLabel = dOpen?t.kindOpen:(dClose?t.kindClose:t.kindMid);
+  let kindBg = dOpen?'#e8f5f2':(dClose?'#fef7e8':'#f1efe9');
+  let kindFg = dOpen?'#2d7a6c':(dClose?'#8a6d20':'#6f6860');
+  let note = '';
+  if(dur<=0) note=t.errDur;
+  else if(dOpen&&!s.canOpen) note=t.blockedOpen;
+  else if(dClose&&!s.canClose) note=t.blockedClose;
+  const invalid = !!note;
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(40,32,24,.4)',display:'flex',alignItems:'center',justifyContent:'center',padding:20,zIndex:50}} onClick={()=>setPicker(null)}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:18,width:340,maxWidth:'100%',boxShadow:'0 20px 60px rgba(0,0,0,.25)',overflow:'hidden'}}>
+        <div style={{padding:'16px 20px',borderBottom:'1px solid #efeae2'}}>
+          <div style={{fontSize:15,fontWeight:800}}>{s.name}</div>
+          <div style={{fontSize:12.5,color:'#8a8278',marginTop:1}}>{t.daysLong[picker.day]}</div>
+        </div>
+        <div style={{padding:'16px 18px',display:'flex',flexDirection:'column',gap:14}}>
+          <div style={{display:'flex',gap:10}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#6f6860',marginBottom:5}}>{t.pStart}</div>
+              <input type="time" step={300} value={picker.start} onChange={e=>setPicker(p=>({...p,start:e.target.value}))} style={{width:'100%',boxSizing:'border-box',border:'1px solid #e0d9cc',borderRadius:10,padding:'10px 11px',fontSize:15,fontWeight:700,background:'#faf8f4',color:'#2a2622',fontFamily:'inherit',fontVariantNumeric:'tabular-nums'}}/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#6f6860',marginBottom:5}}>{t.pEnd}</div>
+              <input type="time" step={300} value={picker.end} onChange={e=>setPicker(p=>({...p,end:e.target.value}))} style={{width:'100%',boxSizing:'border-box',border:'1px solid #e0d9cc',borderRadius:10,padding:'10px 11px',fontSize:15,fontWeight:700,background:'#faf8f4',color:'#2a2622',fontFamily:'inherit',fontVariantNumeric:'tabular-nums'}}/>
+            </div>
+          </div>
+          <div style={{alignSelf:'flex-start',fontSize:11.5,fontWeight:700,padding:'3px 11px',borderRadius:20,background:kindBg,color:kindFg}}>{kindLabel}</div>
+          <div style={{display:'flex',gap:7,flexWrap:'wrap'}}>
+            <button onClick={()=>setPicker(p=>({...p,start:'07:00',end:'15:00'}))} style={{flex:1,minWidth:84,border:'1px solid #c0e0d8',background:'#eef8f6',color:'#2d7a6c',borderRadius:9,padding:'8px 6px',fontSize:11.5,fontWeight:700,cursor:'pointer'}}>{t.optFrueh}</button>
+            <button onClick={()=>setPicker(p=>({...p,start:spaetStart,end:closeStr}))} style={{flex:1,minWidth:84,border:'1px solid #e8d8a8',background:'#fef7e8',color:'#8a6d20',borderRadius:9,padding:'8px 6px',fontSize:11.5,fontWeight:700,cursor:'pointer'}}>{t.optSpaet}</button>
+            <button onClick={()=>setPicker(p=>({...p,start:'09:00',end:'14:00'}))} style={{flex:1,minWidth:84,border:'1px solid #e4ded4',background:'#f4f2ec',color:'#6f6860',borderRadius:9,padding:'8px 6px',fontSize:11.5,fontWeight:700,cursor:'pointer'}}>{t.optMitte}</button>
+          </div>
+          {invalid && <div style={{fontSize:11.5,fontWeight:600,color:'#b05030',background:'#fde8e4',border:'1px solid #e8c8b8',borderRadius:9,padding:'8px 10px'}}>{note}</div>}
+        </div>
+        <div style={{padding:'14px 18px',borderTop:'1px solid #efeae2',display:'flex',gap:9,alignItems:'center'}}>
+          <button onClick={()=>commitShift('-')} style={{border:'1px solid #e3ddd2',background:'#fff',borderRadius:10,padding:'10px 14px',fontSize:13,fontWeight:700,color:'#7a7268',cursor:'pointer'}}>{t.optFrei}</button>
+          <div style={{flex:1}}/>
+          <button onClick={()=>setPicker(null)} style={{border:'1px solid #e3ddd2',background:'#fff',borderRadius:10,padding:'10px 14px',fontSize:13,fontWeight:700,color:'#4a443c',cursor:'pointer'}}>{t.cancel}</button>
+          <button onClick={()=>{if(!invalid)commitShift(draft);}} style={{border:'none',background:invalid?'#ece7df':'#3d9e8e',color:invalid?'#a8a094':'#fff',borderRadius:10,padding:'10px 16px',fontSize:13,fontWeight:700,cursor:invalid?'not-allowed':'pointer'}}>{t.apply}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
